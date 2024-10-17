@@ -19,7 +19,24 @@ export async function POST(req: Request) {
 
     console.log('Valid YouTube URL:', youtubeUrl);
 
-    // Step 2: Download audio from YouTube
+    // Step 2: Check if the transcription for the given YouTube URL already exists in the database
+    const { data: existingTranscript, error: fetchError } = await supabase
+      .from('transcripts')
+      .select('id, transcript')
+      .eq('youtube_url', youtubeUrl)
+      .single(); // Fetch a single result if it exists
+
+    if (fetchError) {
+      throw new Error(`Error checking for existing transcription: ${fetchError.message}`);
+    }
+
+    // If transcription exists, return it instead of transcribing again
+    if (existingTranscript) {
+      console.log(`Transcript already exists with ID: ${existingTranscript.id}`);
+      return NextResponse.json({ transcript: existingTranscript.transcript, id: existingTranscript.id });
+    }
+
+    // Step 3: Download audio from YouTube
     const audioStream = await ytdl.download(youtubeUrl, {
       streamType: 'nodejs', // Ensure the stream type is set for Node.js
       filter: 'audioonly', // Use the audio-only filter
@@ -43,16 +60,16 @@ export async function POST(req: Request) {
 
     const fileBuffer = await streamPromise;
 
-    // Step 3: Upload the audio to Supabase Storage
+    // Step 4: Upload the audio to Supabase Storage
     const fileName = `${uuidv4()}.mp3`;
     const publicUrl = await uploadAudioToSupabase(fileName, fileBuffer);
     console.log('Audio uploaded to Supabase. Public URL:', publicUrl);
 
-    // Step 4: Transcribe the uploaded audio using AssemblyAI
+    // Step 5: Transcribe the uploaded audio using AssemblyAI
     const transcriptId = await transcribeAudioUrl(publicUrl);
     console.log('Transcription started. Transcript ID:', transcriptId);
 
-    // Step 5: Poll for transcription result
+    // Step 6: Poll for transcription result
     let result;
     do {
       await new Promise(resolve => setTimeout(resolve, 5000)); // Wait for 5 seconds
@@ -63,7 +80,7 @@ export async function POST(req: Request) {
       throw new Error('Transcription failed');
     }
 
-    // Step 6: Store the transcript in Supabase
+    // Step 7: Store the transcript in Supabase
     const { data, error } = await supabase
       .from('transcripts')
       .insert({ youtube_url: youtubeUrl, transcript: result.text })
