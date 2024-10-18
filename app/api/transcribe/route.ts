@@ -1,48 +1,45 @@
 import { NextResponse } from 'next/server';
 import { transcribeAudioUrl, getTranscriptionResult } from '@/lib/assemblyai';
 import { supabase, uploadAudioToSupabase } from '@/lib/supabase';
-import fs from 'fs';
 import { YtdlCore } from '@ybd-project/ytdl-core';
 import { v4 as uuidv4 } from 'uuid'; // To generate unique filenames
 
-// No need to instantiate YtdlCore for validation
 const ytdl = new YtdlCore();
 
 export async function POST(req: Request) {
   const { youtubeUrl } = await req.json();
 
   try {
-    // Step 1: Validate YouTube URL using the static method
+    // Step 1: Validate YouTube URL
     if (!YtdlCore.validateURL(youtubeUrl)) {
       throw new Error('Invalid YouTube URL');
     }
 
     console.log('Valid YouTube URL:', youtubeUrl);
 
-    // Step 2: Check if the transcription for the given YouTube URL already exists in the database
-    const { data: existingTranscript, error: fetchError } = await supabase
+    // Step 2: Check if a transcription for this URL already exists
+    const { data: existingTranscripts, error: checkError } = await supabase
       .from('transcripts')
-      .select('id, transcript')
+      .select('*')
       .eq('youtube_url', youtubeUrl)
-      .single(); // Fetch a single result if it exists
+      .limit(1); // Ensure you only get one row
 
-    if (fetchError) {
-      throw new Error(`Error checking for existing transcription: ${fetchError.message}`);
+    if (checkError) {
+      throw new Error(`Error checking for existing transcription: ${checkError.message}`);
     }
 
-    // If transcription exists, return it instead of transcribing again
-    if (existingTranscript) {
-      console.log(`Transcript already exists with ID: ${existingTranscript.id}`);
-      return NextResponse.json({ transcript: existingTranscript.transcript, id: existingTranscript.id });
+    if (existingTranscripts && existingTranscripts.length > 0) {
+      // If a transcript exists, return it without re-transcribing
+      console.log(`Transcript already exists for URL: ${youtubeUrl}`);
+      return NextResponse.json({ transcript: existingTranscripts[0].transcript, id: existingTranscripts[0].id });
     }
 
-    // Step 3: Download audio from YouTube
+    // Step 3: Download audio from YouTube if no existing transcription
     const audioStream = await ytdl.download(youtubeUrl, {
       streamType: 'nodejs', // Ensure the stream type is set for Node.js
-      filter: 'audioonly', // Use the audio-only filter
-    }) as NodeJS.ReadableStream; // Explicitly cast to NodeJS.ReadableStream
+      filter: 'audioonly',  // Use the audio-only filter
+    }) as NodeJS.ReadableStream;
 
-    // Create a Promise to handle stream errors and gather chunks
     const streamPromise = new Promise<Buffer>((resolve, reject) => {
       const chunks: Uint8Array[] = [];
       audioStream.on('data', (chunk) => {
@@ -80,7 +77,7 @@ export async function POST(req: Request) {
       throw new Error('Transcription failed');
     }
 
-    // Step 7: Store the transcript in Supabase
+    // Step 7: Store the new transcript in Supabase
     const { data, error } = await supabase
       .from('transcripts')
       .insert({ youtube_url: youtubeUrl, transcript: result.text })
@@ -93,6 +90,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ transcript: result.text, id: data[0].id });
+
   } catch (error) {
     if (error instanceof Error) {
       console.error('Error:', error.message);
