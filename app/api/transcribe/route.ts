@@ -1,17 +1,15 @@
 import { NextResponse } from 'next/server';
 import { transcribeAudioUrl, getTranscriptionResult } from '@/lib/assemblyai';
 import { supabase, uploadAudioToSupabase } from '@/lib/supabase';
-import { YtdlCore } from '@ybd-project/ytdl-core';
-import { v4 as uuidv4 } from 'uuid'; // To generate unique filenames
-
-const ytdl = new YtdlCore();
+import ytdl from '@distube/ytdl-core';
+import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(req: Request) {
   const { youtubeUrl } = await req.json();
 
   try {
     // Step 1: Validate YouTube URL
-    if (!YtdlCore.validateURL(youtubeUrl)) {
+    if (!ytdl.validateURL(youtubeUrl)) {
       throw new Error('Invalid YouTube URL');
     }
 
@@ -35,9 +33,8 @@ export async function POST(req: Request) {
     }
 
     // Step 3: Download audio from YouTube if no existing transcription
-    const audioStream = await ytdl.download(youtubeUrl, {
-      streamType: 'nodejs', // Ensure the stream type is set for Node.js
-      filter: 'audioonly',  // Use the audio-only filter
+    const audioStream = ytdl(youtubeUrl, {
+      filter: 'audioonly', // Use the audio-only filter
     }) as NodeJS.ReadableStream;
 
     const streamPromise = new Promise<Buffer>((resolve, reject) => {
